@@ -1,6 +1,6 @@
 # Test Strategy — Subscription & Billing Service
 
-**Status:** Proposed test strategy for initial design review. **No tests are written yet.**
+**Status:** Implemented. Every must-have scenario below exists as a Jest test named with its ID (130 tests, all passing at the time of writing; see the README for the latest run).
 **Framework:** TypeScript + Jest + Supertest (design decision; both are suggested by the assignment)
 **System under test:** minimal Express fixture backed by SQLite, with a mocked payment provider
 **Time box:** two working days (recruiter guidance). **Must-have** scenarios first; **optional** ones only after all must-haves pass.
@@ -42,18 +42,18 @@ There is no UI automation, because there is no frontend.
 | Clock | **Controllable fake** | Deterministic trial ends, periods and timestamps |
 | Scheduler | **Replaced** by explicit `BillingRunner.runDue(now)` calls | Deterministic time-based transitions (assumption A-05) |
 
-## 4. Planned test architecture
+## 4. Test architecture
 
-The structure follows the assignment's "Architecture Expectations" (§1–6). It is planned, not implemented.
+The structure follows the assignment's "Architecture Expectations" (§1–6). It is implemented as described below.
 
-| Layer | Planned component | Responsibility |
+| Layer | Component | Responsibility |
 |---|---|---|
 | Fixtures / environment | `TestEnvironment` | Create the in-memory DB, schema and seed data; build the app; inject the mock provider and fake clock; expose repositories |
 | API client | `SubscriptionApiClient` | Typed methods (`create`, `get`, `cancel`, `postWebhook`) wrapping Supertest; transport details stay out of tests |
 | Mock provider / webhook simulator | `MockPaymentProvider`, `WebhookSimulator` | Scripted outcomes (success, decline, timeout); recorded calls; signed, unsigned and tampered payloads |
-| Verification layer | `expectSubscription`, `expectProviderCalls`, `expectNoSideEffects`, `InvariantChecker` | Reusable API, DB, provider and invariant assertions with readable failure messages |
+| Verification layer | `expectApiMatchesDb`, `expectedChargeRequest`, `expectNoDatabaseChanges`, `findInvariantViolations` (`tests/support/assertions/`) | Reusable API, DB, provider and invariant assertions with readable failure messages |
 | Builders | `aCustomer()`, `aSubscriptionRequest()`, `aWebhook()` | Defaults plus intent-revealing overrides |
-| Scenarios | `tests/{unit,api,lifecycle,webhooks,persistence,e2e}` | Grouped by business concern, named in business language |
+| Scenarios | `tests/{unit,api,lifecycle,webhooks,provider,persistence,e2e}` | Grouped by business concern, named in business language |
 
 **Shared invariant checker.** An `afterEach` hook runs the persistence invariants (`DATABASE_DESIGN.md` §7) against the test's database. Consistency between the API and the DB is then enforced in **every** test, not only the ones that remember to check it.
 
@@ -165,6 +165,7 @@ U-01 additionally proves every unlisted pair is rejected at domain level.
 | PAY-02 | Rejected creation, trial creation, cancel, `GET`, any inbound webhook, idempotent replay of `POST /subscriptions` | **Zero** new calls |
 | PAY-03 | Retry | New call with `attempt_number + 1` and a different idempotency key; same invoice and amount |
 | PAY-04 | Timeout | One call; the attempt is not re-charged by the next `BillingRunner` run; a webhook reconciles it |
+| PAY-04b | Timed-out **retry** on a `past_due` subscription | Not retried again. Added after mutation testing showed this path was unguarded by any test |
 | PAY-05 | Canceled subscription at period end | `BillingRunner` makes zero calls |
 
 ### 5.8 Persistence and partial failures (assignment §3, §G; recruiter: partial failures)
@@ -211,13 +212,17 @@ U-01 additionally proves every unlisted pair is rejected at domain level.
 
 ## 8. Execution
 
-Planned commands. They will be confirmed when the project is initialised and documented in the README:
+Commands (run from `submission/abhijeet-luthra/`):
 
 - `npm test`: the whole suite.
 - `npm run typecheck`: `tsc --noEmit`.
-- `npm run lint`.
+- `npm run lint`: ESLint.
+- `npm run validate:schema`: builds the schema in a fresh database and proves key constraints reject bad data.
+- `npm run validate`: all of the above, in order.
 
 Results are reported only from actual runs.
+
+**Mutation check.** The tests were also checked by deliberately breaking rules in the service and confirming the matching tests fail. Broken on purpose: the duplicate `event_id` check, the ambiguous-match guard, the Idempotency-Key lookup, the stale-failure guard, and the no-re-charge-on-timeout guard. One mutant (re-charging a timed-out *retry*) initially survived; PAY-04b was added and now kills it.
 
 ## 9. Red, Blue, Green order (two-day plan)
 
@@ -238,7 +243,7 @@ Results are reported only from actual runs.
 | OPT-01 | Concurrent in-flight `POST /subscriptions` requests sharing one `Idempotency-Key` | The sequential case is must-have (DUP-01…05). The unique key constraint guards the concurrent case |
 | OPT-02 | Concurrent duplicate webhook delivery | The assignment marks it as a bonus |
 | OPT-03 | `Notifier` seam and spy, proving duplicate webhooks fire a notification once | The assignment says "if your fixture models one" |
-| OPT-04 | Provider "hard error" (5xx) outcome, beyond success, decline and timeout | Not required; treated like a timeout if added |
+| OPT-04 | Provider "hard error" outcome, beyond success, decline and timeout | **Implemented**: treated as an unknown outcome (`timed_out`, `provider_error`) |
 | OPT-05 | Plan-change endpoint | Mentioned in the overview, not among the core operations (A-14) |
 | OPT-06 | JSON-schema validation of response shapes | Explicit field assertions already cover the shape |
 | OPT-07 | Coverage report | Nice to have |

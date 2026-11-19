@@ -2,7 +2,7 @@
 
 **Candidate:** Abhijeet Luthra
 **System:** Subscription & Billing Service
-**Status:** Initial design submission (documentation-only PR). **Implementation has not started.**
+**Status:** Implemented. This document was the pre-implementation design; §23 lists where the implementation differs from or refines it.
 **Selected approach:** Option 3 (Hybrid): a minimal TypeScript/Express service fixture, SQLite persistence and a mocked payment provider. Mandatory scope comes first.
 
 ## 1. Purpose
@@ -169,13 +169,13 @@ submission/abhijeet-luthra/
 
 ## 8. Planned design patterns
 
-These are **planned design decisions, not implemented functionality**. The final PR will name only the patterns actually present in the code. The assignment explicitly says that naming an absent pattern is a red flag.
+These were planned before implementation. All four are now present in the code (file references in §23). The assignment explicitly says that naming an absent pattern is a red flag, so the wording below matches the code.
 
 | Pattern | Where (planned) | Problem it solves |
 |---|---|---|
 | **State / explicit transition table** | `domain/` subscription lifecycle (and payment-attempt status) | Without it, `status` would be a string mutated from many call sites, and illegal transitions would be easy to write by accident. One table defines every legal `(from, trigger) → to` move. Every service asks the table, and unlisted moves are rejected in one place. It is also exhaustively unit-testable (all 4×4 pairs). |
-| **Builder** | `tests/support/builders/` | Scenarios need many slightly different customers, subscription requests and webhook payloads, including deliberately invalid or unsigned ones. Builders give sensible defaults plus intent-revealing overrides (`aWebhook().paymentFailed().forInvoice(id).withTamperedBody()`), which removes repeated object literals. |
-| **Adapter / dependency injection** | `PaymentProvider` interface injected into the billing service | The provider is external and must be mocked, not assumed. The service depends only on the interface. Tests inject `MockPaymentProvider` with scripted outcomes (success, decline, timeout) and inspect the recorded calls. A real HTTP adapter could be plugged in without changing the service. |
+| **Builder** | `tests/support/builders/` | Scenarios need many slightly different customers, subscription requests and webhook payloads, including deliberately invalid ones. Builders give sensible defaults plus intent-revealing overrides (`aWebhook().failed().forInvoice(invoice).without('event_id')`), which removes repeated object literals. Signature tampering is a mode of the `WebhookSimulator`. |
+| **Interface seam + dependency injection** (planned as "Adapter / DI") | `PaymentProvider` interface, constructor-injected into `BillingService` via `src/fixture.ts` | The provider is external and must be mocked, not assumed. The service depends only on the interface. Tests inject `MockPaymentProvider` with scripted outcomes (success, decline, timeout) and inspect the recorded calls. **No real-provider adapter class exists** (there is no real provider), so the implemented pattern is named "interface + DI", one of the options the assignment lists. |
 | **Repository** (the "one more pattern" required) | `repositories/` | Keeps raw SQL out of routes and test scenarios. The same repositories back both the service and the test verification layer, so persistence assertions read as business queries (`payments.findByInvoice(id)`). |
 
 **Plan-specific behavior** (price, trial length) is planned to be **data-driven from the `plans` table** rather than `if (plan === 'pro')` branches. If plan behavior grows beyond configuration values, a Strategy per plan would be the next step, but it is not planned unless needed.
@@ -405,3 +405,27 @@ AI tools (Claude Code) are used to analyse the requirements, review these docume
 ---
 
 **Workflow note:** This documentation PR is the recruiter-requested "approach first" step. It is **not a gate**: implementation continues right after the PR is raised. Reviewer feedback, when it arrives, is incorporated as follow-up commits on the same branch.
+
+## 23. Implementation notes (added after implementation)
+
+Where each design element lives:
+
+| Design element | Implementation |
+|---|---|
+| Transition table (State) | `src/domain/subscription-state-machine.ts`, `src/domain/payment-state-machine.ts`. `src/services/lifecycle.ts` is the only code that writes a subscription status, and it always asks the table and writes an audit row |
+| One place that applies payment outcomes | `src/services/payment-outcome-applier.ts`, shared by synchronous provider results and webhooks |
+| Consistency boundary (Tx A, provider call, Tx B) | `src/services/billing-service.ts` (`createAttempt`, `executeCharge`) |
+| BillingRunner (A-05) | `src/services/billing-runner.ts` |
+| Idempotency-Key (A-16) | `src/services/subscription-service.ts` |
+| Webhook matching and quarantine (A-17) | `src/services/webhook-service.ts` (`matchAttempt`) |
+| Interface + DI provider seam | `src/providers/payment-provider.ts`, wired in `src/fixture.ts` |
+| Repository | `src/repositories/*` |
+| Builders | `tests/support/builders/*` |
+
+Refinements made during implementation (none changes documented business behavior):
+
+- **Provider errors other than a timeout** (e.g. a connection reset) are also recorded as `timed_out`, with `failure_code = provider_error`. We cannot know whether money moved, so treating them as a decline would be unsafe. This was OPT-04 and is now tested.
+- **Canceled subscriptions** are checked in two places: the webhook service and the outcome applier (defense in depth). Mutation testing showed the second check is unreachable today, because cancelling also voids open invoices. It is kept deliberately.
+- **Partial-failure injection** uses `jest.spyOn` on real repository instances in tests. No failure hooks exist in the service code.
+- **Concurrency:** `better-sqlite3` is synchronous and the fixture runs on one Node.js thread. The idempotency-key lookup and the Tx A insert therefore cannot interleave between two requests. Concurrent delivery remains untested (optional scope).
+

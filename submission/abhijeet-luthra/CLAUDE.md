@@ -45,6 +45,10 @@ Never modify `SDET_ASSIGNMENT.md`, the root `README.md` or `pull_request_templat
 8. **Must-have before optional.** Follow the priority order in `TEST_STRATEGY.md` §9. Optional items (§10) start only when all must-haves pass.
 9. SQL lives only in the schema and repository modules.
 
+### Commands (run from this folder)
+
+`npm test` · `npm run typecheck` · `npm run lint` · `npm run validate:schema` · `npm run validate` (all checks). Tests live in `tests/` and support code in `tests/support/`. The composition root is `src/fixture.ts`.
+
 ## 5. Honesty rules
 
 - **Never claim tests pass, the build works or lint is clean without actually running the command in this session and reading the output.** Quote the real result. If something was not run, say so.

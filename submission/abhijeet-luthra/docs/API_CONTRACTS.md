@@ -1,6 +1,6 @@
 # API Contracts — Subscription & Billing Service
 
-**Status:** Proposed fixture contract for initial design review. **Not implemented yet.**
+**Status:** Implemented (`src/http/`, `src/services/`) and covered by `tests/api/` and `tests/webhooks/`.
 **Base path:** none (the assignment's paths are used as given)
 **Content type:** `application/json`
 **Date/time format:** ISO 8601 UTC

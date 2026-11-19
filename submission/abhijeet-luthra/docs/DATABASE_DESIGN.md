@@ -1,6 +1,6 @@
 # Database Design — Subscription & Billing Service
 
-**Status:** Proposed SQLite schema for initial design review. **Not implemented yet.**
+**Status:** Implemented in `src/db/schema.ts` and `src/repositories/`. Validated by `npm run validate:schema` and `tests/persistence/`.
 **Database:** SQLite via `better-sqlite3` (design decision)
 **Purpose:** Define entities, relationships, constraints, transaction boundaries and persistence verification before implementation.
 
